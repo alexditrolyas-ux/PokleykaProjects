@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Match 3 Deluxe</title>
+<style>
+body {
+  background-color: #111;
+  color: #fff;
+  font-family: Arial, sans-serif;
+  text-align: center;
+  margin: 0;
+  padding: 20px;
+}
+
+#scoreboard {
+  display: flex;
+  justify-content: center;
+  gap: 25px;
+  margin-bottom: 15px;
+  font-size: 20px;
+}
+
+#board {
+  display: grid;
+  grid-template-columns: repeat(8, 50px);
+  grid-template-rows: repeat(8, 50px);
+  gap: 5px;
+  width: max-content;
+  margin: 0 auto;
+  background: #222;
+  padding: 5px;
+  border-radius: 10px;
+  position: relative;
+}
+
+.cell {
+  width: 50px;
+  height: 50px;
+  border-radius: 8px;
+  background-color: gray;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.3s, transform 0.3s;
+  position: relative;
+}
+
+.red { background-color: #e74c3c; }
+.blue { background-color: #3498db; }
+.green { background-color: #2ecc71; }
+.yellow { background-color: #f1c40f; }
+.purple { background-color: #9b59b6; }
+
+.selected {
+  outline: 3px solid white;
+  transform: scale(1.2);
+  z-index: 2;
+}
+
+.match {
+  animation: explode 0.25s forwards;
+}
+@keyframes explode {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.5); opacity: 0.7; }
+  100% { transform: scale(0); opacity: 0; }
+}
+
+.bomb { box-shadow: 0 0 10px 3px orange, 0 0 20px 5px red inset; animation: glowBomb 1s infinite alternate; }
+@keyframes glowBomb {
+  0% { box-shadow: 0 0 10px 3px orange, 0 0 20px 5px red inset; }
+  100% { box-shadow: 0 0 20px 6px orange, 0 0 30px 8px red inset; }
+}
+
+.lightning { box-shadow: 0 0 10px 3px cyan, 0 0 20px 5px blue inset; animation: glowLightning 1s infinite alternate; }
+@keyframes glowLightning {
+  0% { box-shadow: 0 0 10px 3px cyan, 0 0 20px 5px blue inset; }
+  100% { box-shadow: 0 0 20px 6px cyan, 0 0 30px 8px blue inset; }
+}
+
+.cell.falling { transition: transform 0.3s ease-in; }
+</style>
+</head>
+<body>
+
+<div id="scoreboard">
+  <div>Очки: <span id="score">0</span></div>
+  <div>Цель: <span id="goal">100</span></div>
+  <div>Уровень: <span id="level">1</span></div>
+  <div>Ходы: <span id="moves">30</span></div>
+</div>
+
+<div id="board"></div>
+
+<script>
+const width = 8;
+const colors = ["red","blue","green","yellow","purple"];
+let board = [];
+let score = 0;
+let level = 1;
+let moves = 30;
+let levelGoal = 100;
+
+const boardEl = document.getElementById("board");
+const scoreEl = document.getElementById("score");
+const goalEl = document.getElementById("goal");
+const levelEl = document.getElementById("level");
+const movesEl = document.getElementById("moves");
+
+let first = null;
+
+// ------------------ Инициализация ------------------
+function createBoard(){
+  boardEl.innerHTML="";
+  board=[];
+  for(let i=0;i<width*width;i++){
+    const cell=document.createElement("div");
+    setCell(cell, randomColor());
+    cell.dataset.id=i;
+    board.push(cell);
+    boardEl.appendChild(cell);
+  }
+  updateUI();
+}
+
+function setCell(cell,color,special=null){
+  cell.className="cell "+color;
+  if(special) cell.classList.add(special);
+}
+
+function randomColor(){ return colors[Math.floor(Math.random()*colors.length)]; }
+
+// ------------------ Игровые действия ------------------
+boardEl.addEventListener("click", e=>{
+  const target=e.target;
+  if(!target.classList.contains("cell")) return;
+
+  if(!first){
+    first=target;
+    first.classList.add("selected");
+  } else {
+    swap(first,target);
+    activateSpecial(first);
+    activateSpecial(target);
+    removeSelection();
+    first=null;
+    moves--;
+    updateUI();
+    if(moves<=0){ alert("Вы проиграли!"); resetLevel(); return; }
+    gameLoop();
+  }
+});
+
+function swap(a,b){
+  const temp=a.className;
+  a.className=b.className;
+  b.className=temp;
+}
+
+function activateSpecial(cell){
+  if(cell.classList.contains("bomb")) explode(cell);
+  if(cell.classList.contains("lightning")) clearColor(cell);
+}
+
+function explode(cell){
+  const id=Number(cell.dataset.id);
+  const row=Math.floor(id/width), col=id%width;
+  for(let r=row-1;r<=row+1;r++){
+    for(let c=col-1;c<=col+1;c++){
+      if(r>=0 && r<width && c>=0 && c<width) removeCell(r*width+c);
+    }
+  }
+}
+
+function clearColor(cell){
+  const color=cell.classList[1];
+  board.forEach((c,i)=>{ if(c.classList.contains(color)) removeCell(i); });
+}
+
+function removeCell(i){
+  if(!board[i]||!board[i].classList[1]) return;
+  board[i].classList.add("match");
+  setTimeout(()=>{
+    board[i].className="cell";
+    score+=10;
+    updateUI();
+    if(score>=levelGoal) nextLevel();
+  },200);
+}
+
+function colorOf(i){ return board[i].classList[1]; }
+function setSpecial(i,type){ board[i].classList.add(type); }
+
+function removeSelection(){
+  board.forEach(c=>c.classList.remove("selected"));
+}
+
+// ------------------ Совпадения ------------------
+function checkMatches(){
+  let matched=new Set();
+  for(let row=0;row<width;row++){
+    let streakColor=null, streak=[];
+    for(let col=0;col<width;col++){
+      let i=row*width+col, c=colorOf(i);
+      if(c && c===streakColor) streak.push(i);
+      else { if(streak.length>=3) streak.forEach(x=>matched.add(x)); streakColor=c; streak=c?[i]:[]; }
+    }
+    if(streak.length>=3) streak.forEach(x=>matched.add(x));
+  }
+  for(let col=0;col<width;col++){
+    let streakColor=null, streak=[];
+    for(let row=0;row<width;row++){
+      let i=row*width+col, c=colorOf(i);
+      if(c && c===streakColor) streak.push(i);
+      else { if(streak.length>=3) streak.forEach(x=>matched.add(x)); streakColor=c; streak=c?[i]:[]; }
+    }
+    if(streak.length>=3) streak.forEach(x=>matched.add(x));
+  }
+  matched.forEach(i=>{
+    if(board[i].classList.contains("bomb")) explode(board[i]);
+    if(board[i].classList.contains("lightning")) clearColor(board[i]);
+    removeCell(i);
+  });
+  return matched.size>0;
+}
+
+// ------------------ Падение ------------------
+function drop(){
+  for(let col=0;col<width;col++){
+    let empty=[];
+    for(let row=width-1;row>=0;row--){
+      let i=row*width+col;
+      if(!colorOf(i)) empty.push(i);
+      else if(empty.length>0){ let t=empty.shift(); board[t].className=board[i].className; board[i].className="cell"; empty.push(i); }
+    }
+    empty.forEach(i=>setCell(board[i],randomColor()));
+  }
+}
+
+// ------------------ Игровой цикл ------------------
+function gameLoop(){
+  if(checkMatches()){
+    setTimeout(()=>{
+      drop();
+      setTimeout(()=>gameLoop(),250);
+    },250);
+  }
+}
+
+// ------------------ Уровни ------------------
+function nextLevel(){
+  level++;
+  score=0;              
+  moves = Math.floor(Math.random()*16)+15; 
+  levelGoal = 100*level; 
+  removeSelection(); 
+  alert("Поздравляем! Переход на уровень "+level);
+  createBoard();
+}
+
+function resetLevel(){
+  score=0;
+  level=1;
+  moves=Math.floor(Math.random()*16)+15;
+  levelGoal=100;
+  removeSelection();
+  createBoard();
+}
+
+// ------------------ UI ------------------
+function updateUI(){
+  scoreEl.innerText=score;
+  goalEl.innerText=levelGoal;
+  levelEl.innerText=level;
+  movesEl.innerText=moves;
+}
+
+// ------------------ Старт ------------------
+createBoard();
+</script>
+
+</body>
+</html>
