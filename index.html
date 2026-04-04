@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Двери и Ключи</title>
-    <script src="@doorpuzzle_bot"></script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         body {
             margin: 0; padding: 0; color: #e0e0e0;
@@ -348,8 +348,8 @@
                 showModal("ПОБЕДА!", "Уровень пройден!", () => { currentLevel++; startLevel(); });
             } else if (moves <= 0) {
                 lives--;
-                if (lives > 0) showModal("ХОДЫ ВЫШЛИ", `Попыток: ${lives}`, startLevel);
-                else showModal("КОНЕЦ ИГРЫ", "Заново?", () => { currentLevel=1; lives=3; startLevel(); });
+                if (lives > 0) showModal("ХОДЫ КОНЧИЛИСЬ!", `Попыток: ${lives}`, startLevel);
+                else showModal("КОНЕЦ ИГРЫ!", "Заново?", () => { currentLevel=1; lives=3; startLevel(); });
             }
         }
 
