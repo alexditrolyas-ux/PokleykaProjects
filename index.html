@@ -37,34 +37,31 @@
             background-color: #111118;
             border-radius: 20px; border: 2px solid rgba(0, 212, 255, 0.3);
             box-shadow: 0 15px 45px rgba(0,0,0,0.8);
-            overflow: visible; /* Чтобы текст мог вылетать за границы */
+            overflow: visible;
         }
 
-        /* СЛОЙ ДЛЯ ВСПЛЫВАЮЩЕГО ТЕКСТА */
-        #combo-layer {
-            position: absolute; width: 100%; height: 100%;
-            top: 0; left: 0; pointer-events: none; z-index: 1000;
-            display: flex; justify-content: center; align-items: center;
-        }
+        #particle-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 100; }
+        #combo-layer { position: absolute; width: 100%; height: 100%; top: 0; left: 0; pointer-events: none; z-index: 1000; display: flex; justify-content: center; align-items: center; }
 
         .combo-text {
-            font-weight: 900; font-size: 42px; opacity: 0;
+            font-weight: 900; font-size: 34px; opacity: 0;
             text-transform: uppercase; text-align: center;
-            filter: drop-shadow(0 0 20px rgba(0,0,0,0.8));
+            filter: drop-shadow(0 0 15px rgba(0,0,0,0.9));
             color: #fff;
         }
 
         @keyframes comboPop {
-            0% { transform: scale(0) rotate(-10deg); opacity: 0; }
-            20% { transform: scale(1.2) rotate(5deg); opacity: 1; }
+            0% { transform: scale(0) rotate(-15deg); opacity: 0; }
+            20% { transform: scale(1.2) rotate(10deg); opacity: 1; }
             40% { transform: scale(1) rotate(0deg); opacity: 1; }
-            100% { transform: translateY(-120px) scale(1.5); opacity: 0; }
+            100% { transform: translateY(-130px) scale(1.4); opacity: 0; }
         }
 
         .item {
             position: absolute; width: 40px; height: 40px;
             display: flex; justify-content: center; align-items: center;
-            font-size: 26px; cursor: pointer; transition: transform 0.25s cubic-bezier(0.3, 1.5, 0.6, 1), top 0.3s ease, left 0.3s ease;
+            font-size: 26px; cursor: pointer; 
+            transition: transform 0.25s cubic-bezier(0.3, 1.5, 0.6, 1), top 0.4s ease, left 0.4s ease;
             user-select: none; z-index: 10;
         }
         .item.selected { 
@@ -72,8 +69,9 @@
             background: radial-gradient(circle, rgba(0, 212, 255, 0.4) 0%, transparent 70%);
             border-radius: 50%;
         }
+        .item.special-rainbow { filter: drop-shadow(0 0 8px #fff); animation: rainbowPulse 1.5s infinite alternate; }
+        @keyframes rainbowPulse { from { transform: scale(1); } to { transform: scale(1.1); } }
 
-        /* МОДАЛКИ */
         .modal-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0, 0, 0, 0.9); backdrop-filter: blur(8px);
@@ -89,9 +87,6 @@
             background: linear-gradient(90deg, #00d4ff, #0077ff); color: #fff; 
             border: none; padding: 14px 0; width: 100%; font-weight: bold; border-radius: 12px; cursor: pointer;
         }
-
-        .particle { position: absolute; pointer-events: none; border-radius: 50%; z-index: 100; animation: particleFly 0.6s ease-out forwards; }
-        @keyframes particleFly { 100% { transform: translate(var(--dx), var(--dy)) scale(0); opacity: 0; } }
     </style>
 </head>
 <body>
@@ -108,6 +103,7 @@
     
     <div class="grid-container">
         <div class="grid" id="grid">
+            <canvas id="particle-canvas"></canvas>
             <div id="combo-layer"><div id="combo-text" class="combo-text"></div></div>
         </div>
     </div>
@@ -123,6 +119,7 @@
     <script>
         const tg = window.Telegram.WebApp; tg.expand();
         const grid = document.getElementById('grid'), comboTextDOM = document.getElementById('combo-text');
+        const canvas = document.getElementById('particle-canvas'), ctx = canvas.getContext('2d');
         const uiLives = document.getElementById('ui-lives'), uiLevel = document.getElementById('ui-level'), uiMoves = document.getElementById('ui-moves'), uiGoal = document.getElementById('ui-goal');
         const modal = document.getElementById('modal'), modalTitle = document.getElementById('modal-title'), modalText = document.getElementById('modal-text'), modalBtn = document.getElementById('modal-btn');
 
@@ -134,67 +131,64 @@
         const items = ['🚪', '🔑', '🗝️', '🔒', '🔨', '🏠']; 
         const SPECIALS = { ROCKET: '🚀', BOMB: '💣', RAINBOW: '🌈' };
 
-        // --- AUDIO ---
         let audioCtx = null;
         function initAudio() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); if(audioCtx.state === 'suspended') audioCtx.resume(); }
-
+        
         function playSfx(type) {
             if (!audioCtx) return;
             const now = audioCtx.currentTime;
             const osc = audioCtx.createOscillator(), g = audioCtx.createGain();
             osc.connect(g); g.connect(audioCtx.destination);
-
-            if (type === 'match') {
-                osc.frequency.setValueAtTime(440, now); g.gain.setValueAtTime(0.1, now);
-                g.gain.exponentialRampToValueAtTime(0.01, now + 0.1); osc.start(); osc.stop(now + 0.1);
-            } else if (type === 'rocket') {
-                osc.type = 'square'; osc.frequency.setValueAtTime(100, now);
-                osc.frequency.exponentialRampToValueAtTime(1000, now + 0.4);
-                g.gain.setValueAtTime(0.05, now); g.gain.linearRampToValueAtTime(0, now + 0.4);
-                osc.start(); osc.stop(now + 0.4);
-            } else if (type === 'bomb') {
-                osc.type = 'sawtooth'; osc.frequency.setValueAtTime(80, now);
-                g.gain.setValueAtTime(0.2, now); g.gain.linearRampToValueAtTime(0, now + 0.5);
-                osc.start(); osc.stop(now + 0.5);
-            }
+            if (type === 'match') { osc.frequency.setValueAtTime(440, now); g.gain.setValueAtTime(0.1, now); g.gain.exponentialRampToValueAtTime(0.01, now + 0.1); osc.start(); osc.stop(now + 0.1); }
+            else if (type === 'rocket') { osc.type = 'square'; osc.frequency.setValueAtTime(100, now); osc.frequency.exponentialRampToValueAtTime(1000, now + 0.4); g.gain.setValueAtTime(0.05, now); g.gain.linearRampToValueAtTime(0, now + 0.4); osc.start(); osc.stop(now + 0.4); }
+            else if (type === 'bomb') { osc.type = 'sawtooth'; osc.frequency.setValueAtTime(80, now); g.gain.setValueAtTime(0.2, now); g.gain.linearRampToValueAtTime(0, now + 0.5); osc.start(); osc.stop(now + 0.5); }
+            else if (type === 'rainbow') { osc.type = 'triangle'; osc.frequency.setValueAtTime(800, now); osc.frequency.linearRampToValueAtTime(1200, now + 0.6); g.gain.setValueAtTime(0.1, now); g.gain.linearRampToValueAtTime(0, now + 0.6); osc.start(); osc.stop(now + 0.6); }
+            else if (type === 'shuffle') { osc.type = 'triangle'; osc.frequency.setValueAtTime(600, now); osc.frequency.exponentialRampToValueAtTime(200, now + 0.5); g.gain.setValueAtTime(0.1, now); g.gain.linearRampToValueAtTime(0, now + 0.5); osc.start(); osc.stop(now + 0.5); }
         }
 
         function playComboSfx(chain) {
             if (!audioCtx) return;
             const now = audioCtx.currentTime;
-            const notes = chain === 2 ? [523, 659] : chain === 3 ? [523, 659, 783] : [523, 659, 783, 1046];
-            notes.forEach((f, i) => {
-                const o = audioCtx.createOscillator(), gn = audioCtx.createGain();
-                o.connect(gn); gn.connect(audioCtx.destination);
-                o.frequency.setValueAtTime(f, now + i * 0.07);
-                gn.gain.setValueAtTime(0.1, now + i * 0.07);
-                gn.gain.exponentialRampToValueAtTime(0.01, now + i * 0.07 + 0.2);
-                o.start(now + i * 0.07); o.stop(now + i * 0.07 + 0.2);
-            });
+            const baseFreq = 440 + ((chain - 1) * 110);
+            const osc = audioCtx.createOscillator(), g = audioCtx.createGain();
+            osc.connect(g); g.connect(audioCtx.destination);
+            osc.frequency.setValueAtTime(baseFreq, now);
+            g.gain.setValueAtTime(0.1, now);
+            g.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+            osc.start(); osc.stop(now + 0.2);
         }
 
-        // --- VISUALS ---
-        function triggerText(txt, color = "#fff") {
-            comboTextDOM.innerText = txt;
-            comboTextDOM.style.color = color;
-            comboTextDOM.style.textShadow = `0 0 20px ${color}`;
-            comboTextDOM.style.animation = 'none';
-            comboTextDOM.offsetHeight; // Force reflow
-            comboTextDOM.style.animation = 'comboPop 1s cubic-bezier(0.17, 0.89, 0.32, 1.28) forwards';
-        }
-
-        function spawnParticles(x, y, color = '#00d4ff') {
-            for (let i = 0; i < 8; i++) {
-                const p = document.createElement('div'); p.className = 'particle';
-                p.style.width = p.style.height = '5px'; p.style.background = color;
-                p.style.left = x + 'px'; p.style.top = y + 'px';
-                p.style.setProperty('--dx', (Math.random() - 0.5) * 100 + 'px');
-                p.style.setProperty('--dy', (Math.random() - 0.5) * 100 + 'px');
-                grid.appendChild(p); setTimeout(() => p.remove(), 600);
+        let particles = [];
+        function initCanvas() { canvas.width = 320; canvas.height = 320; }
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x; this.y = y; this.color = color;
+                this.size = Math.random() * 4 + 2;
+                this.speedX = (Math.random() - 0.5) * 6;
+                this.speedY = (Math.random() - 0.5) * 6;
+                this.gravity = 0.1; this.alpha = 1;
+                this.decay = Math.random() * 0.02 + 0.015;
             }
+            update() { this.x += this.speedX; this.y += this.speedY; this.speedY += this.gravity; this.alpha -= this.decay; if (this.size > 0.1) this.size -= 0.05; }
+            draw() { ctx.save(); ctx.globalAlpha = this.alpha; ctx.fillStyle = this.color; ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }
+        }
+        function spawnParticles(x, y, color = '#00d4ff') { for (let i = 0; i < 12; i++) particles.push(new Particle(x, y, color)); }
+        function animateParticles() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            for (let i = 0; i < particles.length; i++) {
+                particles[i].update(); particles[i].draw();
+                if (particles[i].alpha <= 0) { particles.splice(i, 1); i--; }
+            }
+            requestAnimationFrame(animateParticles);
         }
 
-        // --- GAME LOGIC ---
+        function triggerText(txt, color = "#fff") {
+            comboTextDOM.innerText = txt; comboTextDOM.style.color = color;
+            comboTextDOM.style.textShadow = `0 0 20px ${color}`;
+            comboTextDOM.style.animation = 'none'; comboTextDOM.offsetHeight; 
+            comboTextDOM.style.animation = 'comboPop 1.2s cubic-bezier(0.17, 0.89, 0.32, 1.28) forwards';
+        }
+
         function updateUI() {
             uiLevel.innerText = currentLevel; uiLives.innerText = '❤️'.repeat(lives) + '🖤'.repeat(3 - lives);
             uiMoves.innerText = moves;
@@ -205,18 +199,13 @@
             score = 0; currentCollected = 0; comboChain = 0;
             moves = 25 - Math.floor(currentLevel/2); if (moves < 12) moves = 12;
             goalType = (currentLevel % 2 !== 0) ? 'score' : 'collect';
-            targetScore = 500 + (currentLevel * 100);
-            targetItem = items[Math.floor(Math.random() * items.length)];
-            targetCount = 10 + currentLevel;
+            targetScore = 500 + (currentLevel * 100); targetItem = items[Math.floor(Math.random() * items.length)]; targetCount = 10 + currentLevel;
             showModal(`УРОВЕНЬ ${currentLevel}`, goalType==='score' ? `Набери ${targetScore} очков` : `Собери ${targetCount} ${targetItem}`, runGameSetup);
         }
 
         function runGameSetup() {
             updateUI(); 
-            // Удаляем только старые айтемы и частицы, оставляем слой комбо
-            Array.from(grid.children).forEach(child => {
-                if(child.id !== 'combo-layer') child.remove();
-            });
+            Array.from(grid.children).forEach(child => { if(child.id !== 'combo-layer' && child.id !== 'particle-canvas') child.remove(); });
             board = [];
             for (let r = 0; r < width; r++) { board[r] = []; for (let c = 0; c < width; c++) addRandomItem(r, c); }
             resolveMatches(true);
@@ -237,11 +226,17 @@
 
         async function onItemClick(item) {
             initAudio(); if (isProcessing) return;
-            if (!selectedItem) { selectedItem = item; item.dom.classList.add('selected'); playSfx('match'); } 
+            if (!selectedItem) { selectedItem = item; item.dom.classList.add('selected'); } 
             else {
                 const dist = Math.abs(selectedItem.r - item.r) + Math.abs(selectedItem.c - item.c);
                 if (dist === 1) {
                     isProcessing = true; selectedItem.dom.classList.remove('selected');
+                    if (selectedItem.special === 'RAINBOW' || item.special === 'RAINBOW') {
+                        let rainbow = selectedItem.special === 'RAINBOW' ? selectedItem : item;
+                        let target = rainbow === selectedItem ? item : selectedItem;
+                        moves--; updateUI(); await activateRainbow(rainbow, target.type);
+                        selectedItem = null; isProcessing = false; checkLevelStatus(); return;
+                    }
                     await swap(selectedItem, item);
                     const matches = checkMatches();
                     if (matches.items.length > 0 || selectedItem.special || item.special) {
@@ -254,6 +249,13 @@
             }
         }
 
+        async function activateRainbow(rainbow, targetType) {
+            playSfx('rainbow'); triggerText("РАДУГА!", "#ffd700");
+            let toDestroy = new Set(); toDestroy.add(rainbow);
+            for(let r=0; r<width; r++) for(let c=0; c<width; c++) if(board[r][c] && board[r][c].type === targetType) toDestroy.add(board[r][c]);
+            await destroyAndRefill(toDestroy);
+        }
+
         function swap(i1, i2) {
             return new Promise(r => {
                 const tr = i1.r, tc = i1.c; board[i1.r][i1.c] = i2; board[i2.r][i2.c] = i1;
@@ -263,68 +265,80 @@
         }
 
         function checkMatches() {
-            let found = new Set(), creations = [];
+            let horizontalMatches = [], verticalMatches = [];
+            let toDestroy = new Set(), creations = [];
             for (let r = 0; r < width; r++) {
-                let line = 1;
-                for (let c = 0; c < width; c++) {
-                    if (c < width-1 && board[r][c].type === board[r][c+1].type && !board[r][c].special) line++;
-                    else {
-                        if (line >= 3) {
-                            for (let k=0; k<line; k++) found.add(board[r][c-k]);
-                            if (line === 4) creations.push({r, c: c-1, type: 'ROCKET'});
-                        }
-                        line = 1;
-                    }
+                let match = [board[r][0]];
+                for (let c = 1; c < width; c++) {
+                    if (board[r][c].type === board[r][c-1].type && !board[r][c].special && !board[r][c-1].special) match.push(board[r][c]);
+                    else { if (match.length >= 3) horizontalMatches.push(match); match = [board[r][c]]; }
                 }
+                if (match.length >= 3) horizontalMatches.push(match);
             }
             for (let c = 0; c < width; c++) {
-                let line = 1;
-                for (let r = 0; r < width; r++) {
-                    if (r < width-1 && board[r][c].type === board[r+1][c].type && !board[r][c].special) line++;
-                    else {
-                        if (line >= 3) {
-                            for (let k=0; k<line; k++) found.add(board[r-k][c]);
-                            if (line >= 4) creations.push({r: r-1, c, type: 'BOMB'});
-                        }
-                        line = 1;
-                    }
+                let match = [board[0][c]];
+                for (let r = 1; r < width; r++) {
+                    if (board[r][c].type === board[r-1][c].type && !board[r][c].special && !board[r-1][c].special) match.push(board[r][c]);
+                    else { if (match.length >= 3) verticalMatches.push(match); match = [board[r][c]]; }
                 }
+                if (match.length >= 3) verticalMatches.push(match);
             }
-            return { items: Array.from(found), creations };
+            horizontalMatches.forEach(hList => {
+                hList.forEach(item => {
+                    let vList = verticalMatches.find(v => v.includes(item));
+                    if (vList) { creations.push({r: item.r, c: item.c, type: 'BOMB'}); hList.forEach(i => toDestroy.add(i)); vList.forEach(i => toDestroy.add(i)); }
+                });
+            });
+            horizontalMatches.concat(verticalMatches).forEach(list => {
+                if (list.length >= 5) creations.push({r: list[2].r, c: list[2].c, type: 'RAINBOW'});
+                else if (list.length === 4) creations.push({r: list[1].r, c: list[1].c, type: 'ROCKET'});
+                list.forEach(i => toDestroy.add(i));
+            });
+            return { items: Array.from(toDestroy), creations };
         }
 
-        async function resolveMatches(silent = false, combos = []) {
+        async function resolveMatches(silent = false, lastSwapped = []) {
             let data = checkMatches();
             let toDestroy = new Set(data.items);
             
-            if (!silent && toDestroy.size > 0) { 
-                comboChain++; 
-                if (comboChain === 2) { triggerText("ХОРОШО!", "#00d4ff"); playComboSfx(2); }
-                else if (comboChain === 3) { triggerText("ОТЛИЧНО!", "#ffd700"); playComboSfx(3); }
-                else if (comboChain >= 4) { triggerText("НЕВЕРОЯТНО!", "#ff00ff"); playComboSfx(4); }
-                else { playSfx('match'); }
-            }
-
-            combos.forEach(pair => {
+            lastSwapped.forEach(pair => {
                 [pair.a, pair.b].forEach(s => {
                     if (!s.special) return; toDestroy.add(s);
-                    if (s.special === 'BOMB') { playSfx('bomb'); for(let dr=-1; dr<=1; dr++) for(let dc=-1; dc<=1; dc++) { let nr=s.r+dr, nc=s.c+dc; if(nr>=0 && nr<width && nc>=0 && nc<width) toDestroy.add(board[nr][nc]); }}
+                    if (s.special === 'BOMB') { playSfx('bomb'); for(let dr=-2; dr<=2; dr++) for(let dc=-2; dc<=2; dc++) { let nr=s.r+dr, nc=s.c+dc; if(nr>=0 && nr<width && nc>=0 && nc<width) toDestroy.add(board[nr][nc]); }}
                     if (s.special === 'ROCKET') { playSfx('rocket'); for(let i=0; i<width; i++){ toDestroy.add(board[s.r][i]); toDestroy.add(board[i][s.c]); }}
                 });
             });
 
-            if (toDestroy.size === 0) return;
-            if (!silent) { 
-                score += toDestroy.size * 10 * comboChain; 
-                if(goalType==='collect') toDestroy.forEach(i => {if(i && i.type===targetItem) currentCollected++;}); 
-                updateUI(); 
+            if (toDestroy.size === 0) {
+                if (!silent && !hasValidMoves()) { isProcessing = true; await shuffleBoard(); isProcessing = false; }
+                return;
             }
 
-            toDestroy.forEach(i => { if(i) { spawnParticles(i.c*40+20, i.r*40+20, i.special ? '#ffd700' : '#00d4ff'); i.dom.style.transform = 'scale(0)'; setTimeout(() => i.dom.remove(), 250); board[i.r][i.c] = null; } });
+            if (!silent) {
+                comboChain++;
+                
+                // Звук срабатывает ТОЛЬКО при нахождении ряда
+                if (comboChain === 1) playSfx('match');
+                else { playComboSfx(comboChain); }
+
+                if (comboChain === 2) triggerText("ХОРОШО!", "#00d4ff");
+                else if (comboChain === 3) triggerText("ОТЛИЧНО!", "#ffd700");
+                else if (comboChain === 4) triggerText("НЕВЕРОЯТНО!", "#ff00ff");
+                else if (comboChain >= 5) triggerText("ЛЕГЕНДАРНО!", "#ffffff");
+                
+                score += toDestroy.size * 10 * comboChain;
+                if(goalType==='collect') toDestroy.forEach(i => {if(i && i.type===targetItem) currentCollected++;});
+                updateUI();
+            }
+
+            await destroyAndRefill(toDestroy, data.creations);
+            return resolveMatches(silent);
+        }
+
+        async function destroyAndRefill(toDestroy, creations = []) {
+            toDestroy.forEach(i => { if(i && board[i.r][i.c]) { spawnParticles(i.c*40+20, i.r*40+20, i.special ? '#ffd700' : '#00d4ff'); i.dom.style.transform = 'scale(0)'; setTimeout(() => i.dom.remove(), 250); board[i.r][i.c] = null; } });
             await new Promise(r => setTimeout(r, 250));
-
-            if (!silent) data.creations.forEach(c => { if (board[c.r][c.c] === null) createItem(c.r, c.c, items[0], c.type); });
-
+            creations.forEach(c => { if (board[c.r][c.c] === null) createItem(c.r, c.c, items[0], c.type); });
             for (let c = 0; c < width; c++) {
                 let empty = 0;
                 for (let r = width - 1; r >= 0; r--) {
@@ -333,8 +347,49 @@
                 }
                 for (let i = 0; i < empty; i++) { const newItem = addRandomItem(i, c); newItem.dom.style.top = '-40px'; setTimeout(() => updateItemPos(newItem), 50); }
             }
-            await new Promise(r => setTimeout(r, 400));
-            return resolveMatches(silent);
+            await new Promise(r => setTimeout(r, 450));
+        }
+
+        function hasValidMoves() {
+            for (let r = 0; r < width; r++) for (let c = 0; c < width; c++) if (board[r][c] && board[r][c].special) return true;
+            for (let r = 0; r < width; r++) {
+                for (let c = 0; c < width; c++) {
+                    if (c < width - 1 && simulateSwapAndCheck(r, c, r, c + 1)) return true;
+                    if (r < width - 1 && simulateSwapAndCheck(r, c, r + 1, c)) return true;
+                }
+            }
+            return false;
+        }
+
+        function simulateSwapAndCheck(r1, c1, r2, c2) {
+            let temp = board[r1][c1]; board[r1][c1] = board[r2][c2]; board[r2][c2] = temp;
+            let hasMatch = hasMatchAt(r1, c1) || hasMatchAt(r2, c2);
+            temp = board[r1][c1]; board[r1][c1] = board[r2][c2]; board[r2][c2] = temp;
+            return hasMatch;
+        }
+
+        function hasMatchAt(r, c) {
+            if (!board[r][c] || board[r][c].special) return false;
+            let type = board[r][c].type, h=1, v=1;
+            for(let i=c-1; i>=0 && board[r][i] && board[r][i].type===type && !board[r][i].special; i--) h++;
+            for(let i=c+1; i<width && board[r][i] && board[r][i].type===type && !board[r][i].special; i++) h++;
+            if(h>=3) return true;
+            for(let i=r-1; i>=0 && board[i][c] && board[i][c].type===type && !board[i][c].special; i--) v++;
+            for(let i=r+1; i<width && board[i][c] && board[i][c].type===type && !board[i][c].special; i++) v++;
+            return v>=3;
+        }
+
+        async function shuffleBoard() {
+            playSfx('shuffle'); triggerText("ПЕРЕМЕШИВАНИЕ", "#ffd700");
+            let all = []; for(let r=0; r<width; r++) for(let c=0; c<width; c++) if(board[r][c]) all.push(board[r][c]);
+            let ok = false;
+            while(!ok) {
+                for(let i=all.length-1; i>0; i--) { const j=Math.floor(Math.random()*(i+1)); [all[i], all[j]] = [all[j], all[i]]; }
+                let idx=0; for(let r=0; r<width; r++) for(let c=0; c<width; c++) { board[r][c]=all[idx++]; board[r][c].r=r; board[r][c].c=c; }
+                if(checkMatches().items.length===0 && hasValidMoves()) ok=true;
+            }
+            for(let r=0; r<width; r++) for(let c=0; c<width; c++) updateItemPos(board[r][c]);
+            await new Promise(res => setTimeout(res, 600));
         }
 
         function showModal(title, text, callback) {
@@ -353,7 +408,7 @@
             }
         }
 
-        startLevel();
+        initCanvas(); animateParticles(); startLevel();
     </script>
 </body>
 </html>
